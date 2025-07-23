@@ -4,7 +4,7 @@ from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
-import speech_recognition as sr
+import whisper
 from pydub import AudioSegment
 import tempfile
 import requests
@@ -29,7 +29,11 @@ class VoiceBot:
             raise ValueError("BOT_TOKEN не знайдено в змінних середовища")
         
         self.application = Application.builder().token(self.bot_token).build()
-        self.recognizer = sr.Recognizer()
+        
+        # Завантаження Whisper моделі
+        logger.info("Завантаження Whisper моделі...")
+        self.whisper_model = whisper.load_model("base")
+        logger.info("Whisper модель завантажена")
         
         # Налаштування обробників повідомлень
         self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
@@ -48,15 +52,20 @@ class VoiceBot:
             voice_file = await context.bot.get_file(update.message.voice.file_id)
             
             # Завантаження та конвертація
-            audio_data = await self.download_and_convert_audio(voice_file.file_path)
+            audio_file_path = await self.download_and_convert_audio(voice_file.file_path)
             
-            if audio_data:
-                # Розпізнавання мови
-                text = await self.recognize_speech(audio_data)
-                if text:
-                    await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
-                else:
-                    await update.message.reply_text("❌ Не вдалося розпізнати мову")
+            if audio_file_path:
+                try:
+                    # Розпізнавання мови
+                    text = await self.recognize_speech(audio_file_path)
+                    if text:
+                        await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
+                    else:
+                        await update.message.reply_text("❌ Не вдалося розпізнати мову")
+                finally:
+                    # Видалення тимчасового WAV файлу
+                    if os.path.exists(audio_file_path):
+                        os.unlink(audio_file_path)
             else:
                 await update.message.reply_text("❌ Помилка обробки аудіо")
                 
@@ -70,14 +79,19 @@ class VoiceBot:
             await update.message.reply_text("🎵 Обробляю аудіо файл...")
             
             audio_file = await context.bot.get_file(update.message.audio.file_id)
-            audio_data = await self.download_and_convert_audio(audio_file.file_path)
+            audio_file_path = await self.download_and_convert_audio(audio_file.file_path)
             
-            if audio_data:
-                text = await self.recognize_speech(audio_data)
-                if text:
-                    await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
-                else:
-                    await update.message.reply_text("❌ Не вдалося розпізнати мову")
+            if audio_file_path:
+                try:
+                    text = await self.recognize_speech(audio_file_path)
+                    if text:
+                        await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
+                    else:
+                        await update.message.reply_text("❌ Не вдалося розпізнати мову")
+                finally:
+                    # Видалення тимчасового WAV файлу
+                    if os.path.exists(audio_file_path):
+                        os.unlink(audio_file_path)
             else:
                 await update.message.reply_text("❌ Помилка обробки аудіо")
                 
@@ -91,14 +105,19 @@ class VoiceBot:
             await update.message.reply_text("🎬 Обробляю аудіо з відео...")
             
             video_file = await context.bot.get_file(update.message.video.file_id)
-            audio_data = await self.download_and_convert_audio(video_file.file_path)
+            audio_file_path = await self.download_and_convert_audio(video_file.file_path)
             
-            if audio_data:
-                text = await self.recognize_speech(audio_data)
-                if text:
-                    await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
-                else:
-                    await update.message.reply_text("❌ Не вдалося розпізнати мову")
+            if audio_file_path:
+                try:
+                    text = await self.recognize_speech(audio_file_path)
+                    if text:
+                        await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
+                    else:
+                        await update.message.reply_text("❌ Не вдалося розпізнати мову")
+                finally:
+                    # Видалення тимчасового WAV файлу
+                    if os.path.exists(audio_file_path):
+                        os.unlink(audio_file_path)
             else:
                 await update.message.reply_text("❌ Помилка обробки аудіо з відео")
                 
@@ -119,7 +138,7 @@ class VoiceBot:
             )
         # В групах бот не відповідає на текстові повідомлення
     
-    async def download_and_convert_audio(self, file_path: str) -> bytes:
+    async def download_and_convert_audio(self, file_path: str) -> str:
         """Завантаження та конвертація аудіо в WAV"""
         try:
             # Завантаження файлу
@@ -139,64 +158,41 @@ class VoiceBot:
                 audio.export(wav_file.name, format='wav')
                 wav_path = wav_file.name
             
-            # Читання WAV файлу
-            with open(wav_path, 'rb') as f:
-                audio_data = f.read()
-            
-            # Видалення тимчасових файлів
+            # Видалення тимчасового OGG файлу
             os.unlink(temp_file_path)
-            os.unlink(wav_path)
             
-            return audio_data
+            return wav_path
             
         except Exception as e:
             logger.error(f"Помилка конвертації аудіо: {e}")
             return None
     
-    async def recognize_speech(self, audio_data: bytes) -> str:
-        """Розпізнавання мови за допомогою SpeechRecognition"""
+    async def recognize_speech(self, audio_file_path: str) -> str:
+        """Розпізнавання мови за допомогою Whisper"""
         try:
-            # Створення AudioData об'єкта
-            audio = sr.AudioData(audio_data, sample_rate=16000, sample_width=2)
+            logger.info("Початок розпізнавання з Whisper")
             
-            # Спробуємо різні варіанти української мови
-            uk_variants = ['uk-UA', 'uk', 'uk_UA']
+            # Розпізнавання з Whisper
+            result = self.whisper_model.transcribe(
+                audio_file_path,
+                language="uk",  # Вказуємо українську мову
+                task="transcribe"
+            )
             
-            for lang in uk_variants:
-                try:
-                    logger.info(f"Спроба розпізнавання з мовою: {lang}")
-                    text = self.recognizer.recognize_google(
-                        audio, 
-                        language=lang,
-                        show_all=False
-                    )
-                    logger.info(f"Успішно розпізнано: {text}")
-                    return text
-                except sr.UnknownValueError:
-                    logger.warning(f"Не вдалося розпізнати з мовою: {lang}")
-                    continue
+            text = result["text"].strip()
+            detected_language = result.get("language", "unknown")
             
-            # Якщо українська не спрацювала, спробуємо англійську
-            try:
-                logger.info("Спроба розпізнавання з англійською мовою")
-                text = self.recognizer.recognize_google(
-                    audio, 
-                    language='en-US',
-                    show_all=False
-                )
-                logger.info(f"Успішно розпізнано англійською: {text}")
+            logger.info(f"Whisper розпізнав мову: {detected_language}")
+            logger.info(f"Розпізнаний текст: {text}")
+            
+            if text:
                 return text
-            except sr.UnknownValueError:
-                logger.warning("Не вдалося розпізнати англійською")
-            
-        except sr.UnknownValueError:
-            logger.warning("Мова не розпізнана")
-            return None
-        except sr.RequestError as e:
-            logger.error(f"Помилка запиту до Google Speech Recognition: {e}")
-            return None
+            else:
+                logger.warning("Whisper повернув порожній текст")
+                return None
+                
         except Exception as e:
-            logger.error(f"Помилка розпізнавання мови: {e}")
+            logger.error(f"Помилка розпізнавання з Whisper: {e}")
             return None
 
 # Створення екземпляру бота
