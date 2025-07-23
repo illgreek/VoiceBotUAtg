@@ -4,7 +4,7 @@ from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
-import whisper
+from faster_whisper import WhisperModel
 from pydub import AudioSegment
 import tempfile
 import requests
@@ -30,10 +30,10 @@ class VoiceBot:
         
         self.application = Application.builder().token(self.bot_token).build()
         
-        # Завантаження Whisper моделі
-        logger.info("Завантаження Whisper моделі...")
-        self.whisper_model = whisper.load_model("base")
-        logger.info("Whisper модель завантажена")
+        # Завантаження Faster Whisper моделі
+        logger.info("Завантаження Faster Whisper моделі...")
+        self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        logger.info("Faster Whisper модель завантажена")
         
         # Налаштування обробників повідомлень
         self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
@@ -168,31 +168,32 @@ class VoiceBot:
             return None
     
     async def recognize_speech(self, audio_file_path: str) -> str:
-        """Розпізнавання мови за допомогою Whisper"""
+        """Розпізнавання мови за допомогою Faster Whisper"""
         try:
-            logger.info("Початок розпізнавання з Whisper")
+            logger.info("Початок розпізнавання з Faster Whisper")
             
-            # Розпізнавання з Whisper
-            result = self.whisper_model.transcribe(
+            # Розпізнавання з Faster Whisper
+            segments, info = self.whisper_model.transcribe(
                 audio_file_path,
                 language="uk",  # Вказуємо українську мову
-                task="transcribe"
+                beam_size=5
             )
             
-            text = result["text"].strip()
-            detected_language = result.get("language", "unknown")
+            # Збираємо текст з сегментів
+            text = " ".join([segment.text for segment in segments]).strip()
+            detected_language = info.language
             
-            logger.info(f"Whisper розпізнав мову: {detected_language}")
+            logger.info(f"Faster Whisper розпізнав мову: {detected_language}")
             logger.info(f"Розпізнаний текст: {text}")
             
             if text:
                 return text
             else:
-                logger.warning("Whisper повернув порожній текст")
+                logger.warning("Faster Whisper повернув порожній текст")
                 return None
                 
         except Exception as e:
-            logger.error(f"Помилка розпізнавання з Whisper: {e}")
+            logger.error(f"Помилка розпізнавання з Faster Whisper: {e}")
             return None
 
 # Створення екземпляру бота
