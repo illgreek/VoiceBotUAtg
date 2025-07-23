@@ -108,13 +108,16 @@ class VoiceBot:
     
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обробка текстових повідомлень"""
-        text = update.message.text
-        await update.message.reply_text(
-            f"👋 Привіт! Я бот для розпізнавання мови.\n\n"
-            f"📤 Надішліть мені голосове повідомлення, аудіо або відео файл, "
-            f"і я перетворю його в текст.\n\n"
-            f"🇺🇦 Підтримую українську мову!"
-        )
+        # Перевіряємо, чи це приватний чат (не група)
+        if update.message.chat.type == "private":
+            text = update.message.text
+            await update.message.reply_text(
+                f"👋 Привіт! Я бот для розпізнавання мови.\n\n"
+                f"📤 Надішліть мені голосове повідомлення, аудіо або відео файл, "
+                f"і я перетворю його в текст.\n\n"
+                f"🇺🇦 Підтримую українську мову!"
+            )
+        # В групах бот не відповідає на текстові повідомлення
     
     async def download_and_convert_audio(self, file_path: str) -> bytes:
         """Завантаження та конвертація аудіо в WAV"""
@@ -156,14 +159,22 @@ class VoiceBot:
             # Створення AudioData об'єкта
             audio = sr.AudioData(audio_data, sample_rate=16000, sample_width=2)
             
-            # Розпізнавання з українською мовою
-            text = self.recognizer.recognize_google(
-                audio, 
-                language='uk-UA',
-                show_all=False
-            )
-            
-            return text
+            # Спробуємо спочатку українську мову
+            try:
+                text = self.recognizer.recognize_google(
+                    audio, 
+                    language='uk-UA',
+                    show_all=False
+                )
+                return text
+            except sr.UnknownValueError:
+                # Якщо українська не спрацювала, спробуємо англійську
+                text = self.recognizer.recognize_google(
+                    audio, 
+                    language='en-US',
+                    show_all=False
+                )
+                return text
             
         except sr.UnknownValueError:
             logger.warning("Мова не розпізнана")
