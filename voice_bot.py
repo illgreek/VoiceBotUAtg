@@ -1,6 +1,7 @@
 import os
 import logging
 import tempfile
+import asyncio
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -26,6 +27,17 @@ class VoiceBot:
         
         self.recognizer = sr.Recognizer()
         self.language = 'uk-UA'  # Українська мова
+        
+        # Створюємо додаток для webhook
+        self.application = Application.builder().token(self.bot_token).build()
+        
+        # Додаємо обробники
+        self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+        self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
+        self.application.add_handler(MessageHandler(filters.AUDIO, self.handle_audio))
+        self.application.add_handler(MessageHandler(filters.VIDEO, self.handle_video))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обробник команди /start"""
@@ -281,22 +293,33 @@ class VoiceBot:
             "💡 Підтримуються формати: OGG, MP3, WAV, MP4 (відео)"
         )
     
+    def handle_update(self, update_dict):
+        """Обробка оновлення від webhook"""
+        try:
+            # Конвертуємо dict в Update об'єкт
+            update = Update.de_json(update_dict, self.application.bot)
+            
+            # Запускаємо обробку асинхронно
+            asyncio.run(self.application.process_update(update))
+            
+        except Exception as e:
+            logger.error(f"Помилка обробки оновлення: {e}")
+    
+    def set_webhook(self, webhook_url):
+        """Встановлення webhook"""
+        try:
+            webhook_url = f"{webhook_url}/webhook"
+            result = self.application.bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook встановлено: {webhook_url}")
+            return result
+        except Exception as e:
+            logger.error(f"Помилка встановлення webhook: {e}")
+            raise e
+    
     def run(self):
-        """Запуск бота"""
-        # Створюємо додаток
-        application = Application.builder().token(self.bot_token).build()
-        
-        # Додаємо обробники
-        application.add_handler(CommandHandler("start", self.start))
-        application.add_handler(CommandHandler("help", self.help_command))
-        application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
-        application.add_handler(MessageHandler(filters.AUDIO, self.handle_audio))
-        application.add_handler(MessageHandler(filters.VIDEO, self.handle_video))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
-        
-        # Запускаємо бота
-        logger.info("Бот запущений!")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        """Запуск бота в режимі polling"""
+        logger.info("Бот запущений в режимі polling!")
+        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     bot = VoiceBot()
