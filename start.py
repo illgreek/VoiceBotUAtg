@@ -159,22 +159,35 @@ class VoiceBot:
             # Створення AudioData об'єкта
             audio = sr.AudioData(audio_data, sample_rate=16000, sample_width=2)
             
-            # Спробуємо спочатку українську мову
+            # Спробуємо різні варіанти української мови
+            uk_variants = ['uk-UA', 'uk', 'uk_UA']
+            
+            for lang in uk_variants:
+                try:
+                    logger.info(f"Спроба розпізнавання з мовою: {lang}")
+                    text = self.recognizer.recognize_google(
+                        audio, 
+                        language=lang,
+                        show_all=False
+                    )
+                    logger.info(f"Успішно розпізнано: {text}")
+                    return text
+                except sr.UnknownValueError:
+                    logger.warning(f"Не вдалося розпізнати з мовою: {lang}")
+                    continue
+            
+            # Якщо українська не спрацювала, спробуємо англійську
             try:
-                text = self.recognizer.recognize_google(
-                    audio, 
-                    language='uk-UA',
-                    show_all=False
-                )
-                return text
-            except sr.UnknownValueError:
-                # Якщо українська не спрацювала, спробуємо англійську
+                logger.info("Спроба розпізнавання з англійською мовою")
                 text = self.recognizer.recognize_google(
                     audio, 
                     language='en-US',
                     show_all=False
                 )
+                logger.info(f"Успішно розпізнано англійською: {text}")
                 return text
+            except sr.UnknownValueError:
+                logger.warning("Не вдалося розпізнати англійською")
             
         except sr.UnknownValueError:
             logger.warning("Мова не розпізнана")
