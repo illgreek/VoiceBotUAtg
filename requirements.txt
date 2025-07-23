@@ -1,5 +1,6 @@
-python-telegram-bot==20.7
+python-telegram-bot==20.3
 python-dotenv==1.0.0
 requests==2.31.0
-faster-whisper==0.9.0
-pydub==0.25.1 
+SpeechRecognition
+pydub==0.25.1
+numpy 

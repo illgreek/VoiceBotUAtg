@@ -5,8 +5,10 @@ import requests
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
-from faster_whisper import WhisperModel
+import speech_recognition as sr
 from pydub import AudioSegment
+import numpy as np
+from ukrainian_punctuation import improve_ukrainian_text
 
 # Налаштування логування
 logging.basicConfig(
@@ -26,26 +28,39 @@ class VoiceBot:
         
         self.application = Application.builder().token(self.bot_token).build()
         
-        # Завантаження Faster Whisper моделі
-        logger.info("Завантаження Faster Whisper моделі...")
-        self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
-        logger.info("Faster Whisper модель завантажена")
+        # Ініціалізація SpeechRecognition
+        logger.info("Ініціалізація SpeechRecognition...")
+        try:
+            self.recognizer = sr.Recognizer()
+            logger.info("SpeechRecognition ініціалізовано")
+        except Exception as e:
+            logger.error(f"Помилка ініціалізації SpeechRecognition: {e}")
+            self.recognizer = None
+        
+
         
         # Налаштування обробників повідомлень
         self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
         self.application.add_handler(MessageHandler(filters.AUDIO, self.handle_audio))
         self.application.add_handler(MessageHandler(filters.VIDEO, self.handle_video))
+        self.application.add_handler(MessageHandler(filters.VIDEO_NOTE, self.handle_video_note))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         
-        logger.info("VoiceBot ініціалізовано")
+        logger.info("VoiceBot з SpeechRecognition ініціалізовано")
     
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обробка голосових повідомлень"""
         try:
-            await update.message.reply_text("🎵 Обробляю голосове повідомлення...")
+            if not self.recognizer:
+                await update.message.reply_text("❌ Розпізнавач не ініціалізований")
+                return
             
             # Отримання файлу
             voice_file = await context.bot.get_file(update.message.voice.file_id)
+            
+            # Відправляємо повідомлення про обробку
+            user_name = update.message.from_user.first_name or "Користувач"
+            processing_msg = await update.message.reply_text(f"🎵 Обробляю голосове повідомлення від {user_name}...")
             
             # Завантаження та конвертація
             audio_file_path = await self.download_and_convert_audio(voice_file.file_path)
@@ -55,15 +70,16 @@ class VoiceBot:
                     # Розпізнавання мови
                     text = await self.recognize_speech(audio_file_path)
                     if text:
-                        await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
+                        # Редагуємо повідомлення з результатом
+                        await processing_msg.edit_text(f"📝 **Розпізнаний текст від {user_name}:**\n\n{text}")
                     else:
-                        await update.message.reply_text("❌ Не вдалося розпізнати мову")
+                        await processing_msg.edit_text("❌ Не вдалося розпізнати мову")
                 finally:
                     # Видалення тимчасового WAV файлу
                     if os.path.exists(audio_file_path):
                         os.unlink(audio_file_path)
             else:
-                await update.message.reply_text("❌ Помилка обробки аудіо")
+                await processing_msg.edit_text("❌ Помилка обробки аудіо")
                 
         except Exception as e:
             logger.error(f"Помилка обробки голосового повідомлення: {e}")
@@ -72,24 +88,31 @@ class VoiceBot:
     async def handle_audio(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обробка аудіо файлів"""
         try:
-            await update.message.reply_text("🎵 Обробляю аудіо файл...")
+            if not self.recognizer:
+                await update.message.reply_text("❌ Розпізнавач не ініціалізований")
+                return
             
             audio_file = await context.bot.get_file(update.message.audio.file_id)
+            
+            # Відправляємо повідомлення про обробку
+            user_name = update.message.from_user.first_name or "Користувач"
+            processing_msg = await update.message.reply_text(f"🎵 Обробляю аудіо файл від {user_name}...")
+            
             audio_file_path = await self.download_and_convert_audio(audio_file.file_path)
             
             if audio_file_path:
                 try:
                     text = await self.recognize_speech(audio_file_path)
                     if text:
-                        await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
+                        await processing_msg.edit_text(f"📝 **Розпізнаний текст від {user_name}:**\n\n{text}")
                     else:
-                        await update.message.reply_text("❌ Не вдалося розпізнати мову")
+                        await processing_msg.edit_text("❌ Не вдалося розпізнати мову")
                 finally:
                     # Видалення тимчасового WAV файлу
                     if os.path.exists(audio_file_path):
                         os.unlink(audio_file_path)
             else:
-                await update.message.reply_text("❌ Помилка обробки аудіо")
+                await processing_msg.edit_text("❌ Помилка обробки аудіо")
                 
         except Exception as e:
             logger.error(f"Помилка обробки аудіо файлу: {e}")
@@ -98,39 +121,82 @@ class VoiceBot:
     async def handle_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обробка відео файлів (тільки аудіо)"""
         try:
-            await update.message.reply_text("🎬 Обробляю аудіо з відео...")
+            if not self.recognizer:
+                await update.message.reply_text("❌ Розпізнавач не ініціалізований")
+                return
             
             video_file = await context.bot.get_file(update.message.video.file_id)
+            
+            # Відправляємо повідомлення про обробку
+            user_name = update.message.from_user.first_name or "Користувач"
+            processing_msg = await update.message.reply_text(f"🎬 Обробляю аудіо з відео від {user_name}...")
+            
             audio_file_path = await self.download_and_convert_audio(video_file.file_path)
             
             if audio_file_path:
                 try:
                     text = await self.recognize_speech(audio_file_path)
                     if text:
-                        await update.message.reply_text(f"📝 **Розпізнаний текст:**\n\n{text}")
+                        await processing_msg.edit_text(f"📝 **Розпізнаний текст від {user_name}:**\n\n{text}")
                     else:
-                        await update.message.reply_text("❌ Не вдалося розпізнати мову")
+                        await processing_msg.edit_text("❌ Не вдалося розпізнати мову")
                 finally:
                     # Видалення тимчасового WAV файлу
                     if os.path.exists(audio_file_path):
                         os.unlink(audio_file_path)
             else:
-                await update.message.reply_text("❌ Помилка обробки аудіо з відео")
+                await processing_msg.edit_text("❌ Помилка обробки аудіо з відео")
                 
         except Exception as e:
             logger.error(f"Помилка обробки відео: {e}")
             await update.message.reply_text("❌ Помилка обробки відео")
     
+    async def handle_video_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обробка відео повідомлень (кружечки)"""
+        try:
+            if not self.recognizer:
+                await update.message.reply_text("❌ Розпізнавач не ініціалізований")
+                return
+            
+            video_note_file = await context.bot.get_file(update.message.video_note.file_id)
+            
+            # Відправляємо повідомлення про обробку
+            user_name = update.message.from_user.first_name or "Користувач"
+            processing_msg = await update.message.reply_text(f"🎬 Обробляю відео повідомлення від {user_name}...")
+            
+            audio_file_path = await self.download_and_convert_audio(video_note_file.file_path)
+            
+            if audio_file_path:
+                try:
+                    text = await self.recognize_speech(audio_file_path)
+                    if text:
+                        await processing_msg.edit_text(f"📝 **Розпізнаний текст від {user_name}:**\n\n{text}")
+                    else:
+                        await processing_msg.edit_text("❌ Не вдалося розпізнати мову")
+                finally:
+                    # Видалення тимчасового WAV файлу
+                    if os.path.exists(audio_file_path):
+                        os.unlink(audio_file_path)
+            else:
+                await processing_msg.edit_text("❌ Помилка обробки аудіо з відео повідомлення")
+                
+        except Exception as e:
+            logger.error(f"Помилка обробки відео повідомлення: {e}")
+            await update.message.reply_text("❌ Помилка обробки відео повідомлення")
+    
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обробка текстових повідомлень"""
         # Перевіряємо, чи це приватний чат (не група)
         if update.message.chat.type == "private":
-            text = update.message.text
             await update.message.reply_text(
-                f"👋 Привіт! Я бот для розпізнавання мови.\n\n"
-                f"📤 Надішліть мені голосове повідомлення, аудіо або відео файл, "
-                f"і я перетворю його в текст.\n\n"
-                f"🇺🇦 Підтримую українську мову!"
+                f"👋 Привіт! Я бот для розпізнавання мови (Google Speech).\n\n"
+                f"📤 Надішліть мені:\n"
+                f"• 🎵 Голосове повідомлення\n"
+                f"• 🎵 Аудіо файл\n"
+                f"• 🎬 Відео файл\n"
+                f"• 🎬 Відео повідомлення (кружечок)\n\n"
+                f"🇺🇦 Підтримую українську мову!\n"
+                f"🌐 Використовую Google Speech API"
             )
         # В групах бот не відповідає на текстові повідомлення
     
@@ -164,37 +230,45 @@ class VoiceBot:
             return None
     
     async def recognize_speech(self, audio_file_path: str) -> str:
-        """Розпізнавання мови за допомогою Faster Whisper"""
+        """Розпізнавання мови за допомогою Google Speech API"""
         try:
-            logger.info("Початок розпізнавання з Faster Whisper")
+            logger.info("Початок розпізнавання з Google Speech API")
             
-            # Розпізнавання з Faster Whisper
-            segments, info = self.whisper_model.transcribe(
-                audio_file_path,
-                language="uk",  # Вказуємо українську мову
-                beam_size=5
+            # Читаємо аудіо файл
+            with sr.AudioFile(audio_file_path) as source:
+                audio = self.recognizer.record(source)
+            
+            # Розпізнаємо текст
+            text = self.recognizer.recognize_google(
+                audio, 
+                language='uk-UA'  # Українська мова
             )
             
-            # Збираємо текст з сегментів
-            text = " ".join([segment.text for segment in segments]).strip()
-            detected_language = info.language
+            logger.info(f"Google Speech API розпізнав текст: {text}")
             
-            logger.info(f"Faster Whisper розпізнав мову: {detected_language}")
-            logger.info(f"Розпізнаний текст: {text}")
-            
-            if text:
+            if text and text.strip():
+                # Покращуємо український текст
+                text = improve_ukrainian_text(text.strip())
                 return text
             else:
-                logger.warning("Faster Whisper повернув порожній текст")
+                logger.warning("Google Speech API повернув порожній текст")
                 return None
                 
-        except Exception as e:
-            logger.error(f"Помилка розпізнавання з Faster Whisper: {e}")
+        except sr.UnknownValueError:
+            logger.warning("Google Speech API не зміг розпізнати мову")
             return None
+        except sr.RequestError as e:
+            logger.error(f"Помилка запиту до Google Speech API: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Помилка розпізнавання з Google Speech API: {e}")
+            return None
+    
+
     
     def run(self):
         """Запуск бота"""
-        logger.info("Запуск VoiceBot...")
+        logger.info("Запуск VoiceBot з Google Speech API...")
         self.application.run_polling()
 
 if __name__ == "__main__":

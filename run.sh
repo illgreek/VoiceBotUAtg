@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🤖 Запуск VoiceBot локально..."
+echo "🤖 Запуск VoiceBot з Coqui TTS..."
 
 # Перевіряємо чи є .env файл
 if [ ! -f ".env" ]; then
@@ -13,8 +13,8 @@ fi
 
 # Встановлюємо залежності
 echo "📦 Встановлення залежностей..."
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Запускаємо бота
 echo "🚀 Запуск бота..."
-python bot.py 
+python3 bot.py 
