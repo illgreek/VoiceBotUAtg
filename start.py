@@ -178,9 +178,11 @@ class VoiceBot:
 # Створення екземпляру бота
 bot = VoiceBot()
 
-# Ініціалізація Application
+# Ініціалізація Application та створення глобального event loop
 import asyncio
-asyncio.run(bot.application.initialize())
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+loop.run_until_complete(bot.application.initialize())
 
 @app.route('/')
 def home():
@@ -193,15 +195,8 @@ def webhook():
         # Отримання даних від Telegram
         update = Update.de_json(request.get_json(), bot.application.bot)
         
-        # Створення нового event loop для обробки
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            # Обробка оновлення
-            loop.run_until_complete(bot.application.process_update(update))
-        finally:
-            loop.close()
+        # Використовуємо глобальний event loop
+        loop.run_until_complete(bot.application.process_update(update))
         
         return 'OK'
     except Exception as e:
