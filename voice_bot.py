@@ -2,6 +2,14 @@ import os
 import logging
 import tempfile
 import asyncio
+import sys
+
+# Додаємо поточну директорію до Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Імпортуємо наш aifc модуль перед speech_recognition
+import aifc
+
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
