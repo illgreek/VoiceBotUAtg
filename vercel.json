@@ -2,14 +2,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "voice_bot.py",
+      "src": "api/index.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "voice_bot.py"
+      "dest": "api/index.py"
     }
   ],
   "env": {
