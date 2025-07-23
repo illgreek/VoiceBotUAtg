@@ -1,13 +1,5 @@
 import os
 import logging
-import sys
-
-# Додаємо поточну директорію до Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# Імпортуємо наш aifc модуль перед speech_recognition
-import aifc
-
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from voice_bot import VoiceBot

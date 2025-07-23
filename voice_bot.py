@@ -2,20 +2,22 @@ import os
 import logging
 import tempfile
 import asyncio
-import sys
-
-# Додаємо поточну директорію до Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# Імпортуємо наш aifc модуль перед speech_recognition
-import aifc
-
+import json
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import speech_recognition as sr
 from pydub import AudioSegment
 import requests
+import soundfile as sf
+import numpy as np
+
+# Vosk для розпізнавання мови
+try:
+    from vosk import Model, KaldiRecognizer
+    VOSK_AVAILABLE = True
+except ImportError:
+    VOSK_AVAILABLE = False
+    logging.warning("Vosk не встановлений, використовуємо fallback")
 
 # Завантажуємо змінні середовища
 load_dotenv()
@@ -33,8 +35,19 @@ class VoiceBot:
         if not self.bot_token:
             raise ValueError("BOT_TOKEN не знайдено в змінних середовища!")
         
-        self.recognizer = sr.Recognizer()
-        self.language = 'uk-UA'  # Українська мова
+        # Ініціалізуємо Vosk модель
+        self.model = None
+        if VOSK_AVAILABLE:
+            try:
+                # Завантажуємо модель для української мови
+                model_path = os.path.join(os.path.dirname(__file__), 'vosk-model-small-uk')
+                if os.path.exists(model_path):
+                    self.model = Model(model_path)
+                    logger.info("Vosk модель завантажена успішно")
+                else:
+                    logger.warning("Vosk модель не знайдена, використовуємо fallback")
+            except Exception as e:
+                logger.error(f"Помилка завантаження Vosk моделі: {e}")
         
         # Створюємо додаток для webhook
         self.application = Application.builder().token(self.bot_token).build()
@@ -120,19 +133,11 @@ class VoiceBot:
                 temp_file.write(voice_data)
                 temp_file_path = temp_file.name
             
-            # Конвертуємо OGG в WAV для кращого розпізнавання
-            audio = AudioSegment.from_ogg(temp_file_path)
-            wav_path = temp_file_path.replace('.ogg', '.wav')
-            audio.export(wav_path, format='wav')
+            # Розпізнаємо мову за допомогою Vosk
+            text = self.recognize_speech(temp_file_path)
             
-            # Розпізнаємо мову
-            with sr.AudioFile(wav_path) as source:
-                audio_data = self.recognizer.record(source)
-                text = self.recognizer.recognize_google(audio_data, language=self.language)
-            
-            # Видаляємо тимчасові файли
+            # Видаляємо тимчасовий файл
             os.unlink(temp_file_path)
-            os.unlink(wav_path)
             
             # Формуємо відповідь
             user_name = update.effective_user.first_name
@@ -144,21 +149,14 @@ class VoiceBot:
             # Відправляємо результат
             await processing_msg.edit_text(response_text, parse_mode='Markdown')
             
-        except sr.UnknownValueError:
+        except Exception as e:
             error_msg = "❌ Не вдалося розпізнати мову. Спробуйте ще раз з більш чіткою мовою."
             if is_group:
                 await processing_msg.edit_text(error_msg)
             else:
                 await processing_msg.delete()
                 await update.message.reply_text(error_msg)
-        
-        except sr.RequestError as e:
-            error_msg = f"❌ Помилка сервісу розпізнавання: {str(e)}"
-            if is_group:
-                await processing_msg.edit_text(error_msg)
-            else:
-                await processing_msg.delete()
-                await update.message.reply_text(error_msg)
+            logger.error(f"Помилка розпізнавання голосу: {e}")
         
         except Exception as e:
             error_msg = "❌ Сталася помилка при обробці голосового повідомлення."
@@ -312,6 +310,42 @@ class VoiceBot:
             
         except Exception as e:
             logger.error(f"Помилка обробки оновлення: {e}")
+    
+    def recognize_speech(self, audio_path):
+        """Розпізнавання мови за допомогою Vosk"""
+        try:
+            if not self.model:
+                return "❌ Модель розпізнавання мови не завантажена"
+            
+            # Конвертуємо аудіо в WAV формат
+            audio = AudioSegment.from_file(audio_path)
+            wav_path = audio_path.replace('.ogg', '.wav').replace('.mp3', '.wav').replace('.m4a', '.wav')
+            audio.export(wav_path, format='wav')
+            
+            # Читаємо аудіо файл
+            data, sample_rate = sf.read(wav_path)
+            
+            # Створюємо розпізнавач
+            rec = KaldiRecognizer(self.model, sample_rate)
+            rec.SetWords(True)
+            
+            # Розпізнаємо мову
+            rec.AcceptWaveform(data.tobytes())
+            result = json.loads(rec.FinalResult())
+            
+            # Видаляємо тимчасовий файл
+            if os.path.exists(wav_path):
+                os.unlink(wav_path)
+            
+            text = result.get('text', '').strip()
+            if text:
+                return text
+            else:
+                return "❌ Не вдалося розпізнати мову"
+                
+        except Exception as e:
+            logger.error(f"Помилка розпізнавання мови: {e}")
+            return f"❌ Помилка розпізнавання: {str(e)}"
     
     def set_webhook(self, webhook_url):
         """Встановлення webhook"""

@@ -6,6 +6,7 @@ services:
     buildCommand: |
       apt-get update && apt-get install -y $(cat apt-packages)
       pip install -r requirements.txt
+      python download_vosk_model.py
     startCommand: python start.py
     envVars:
       - key: BOT_TOKEN
