@@ -30,7 +30,7 @@
 
 1. **Створіть файл `.env` (локально):**
    ```env
-   BOT_TOKEN=8137094513:AAEl6bC6g9pNeuM2CeZI_bJRQBSjAdh70mo
+   BOT_TOKEN=kvdvods45josjg
    ```
 
 2. **НЕ завантажуйте `.env` в GitHub!**
@@ -48,7 +48,7 @@
 
 3. **Налаштуйте змінні середовища:**
    - В розділі "Environment Variables"
-   - Додайте: `BOT_TOKEN` = `8137094513:AAEl6bC6g9pNeuM2CeZI_bJRQBSjAdh70mo`
+   - Додайте: `BOT_TOKEN` = `gdfglkfdglks[gksd]`
 
 4. **Розгорніть проект:**
    - Натисніть "Deploy"
