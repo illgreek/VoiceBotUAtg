@@ -193,8 +193,15 @@ def webhook():
         # Отримання даних від Telegram
         update = Update.de_json(request.get_json(), bot.application.bot)
         
-        # Обробка оновлення (асинхронно)
-        asyncio.create_task(bot.application.process_update(update))
+        # Створення нового event loop для обробки
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Обробка оновлення
+            loop.run_until_complete(bot.application.process_update(update))
+        finally:
+            loop.close()
         
         return 'OK'
     except Exception as e:
