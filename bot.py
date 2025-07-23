@@ -1,13 +1,12 @@
 import os
 import logging
-from flask import Flask, request
+import tempfile
+import requests
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
 from faster_whisper import WhisperModel
 from pydub import AudioSegment
-import tempfile
-import requests
 
 # Налаштування логування
 logging.basicConfig(
@@ -19,14 +18,11 @@ logger = logging.getLogger(__name__)
 # Завантаження змінних середовища
 load_dotenv()
 
-# Створення Flask додатку
-app = Flask(__name__)
-
 class VoiceBot:
     def __init__(self):
         self.bot_token = os.getenv('BOT_TOKEN')
         if not self.bot_token:
-            raise ValueError("BOT_TOKEN не знайдено в змінних середовища")
+            raise ValueError("BOT_TOKEN не знайдено в .env файлі")
         
         self.application = Application.builder().token(self.bot_token).build()
         
@@ -195,36 +191,12 @@ class VoiceBot:
         except Exception as e:
             logger.error(f"Помилка розпізнавання з Faster Whisper: {e}")
             return None
+    
+    def run(self):
+        """Запуск бота"""
+        logger.info("Запуск VoiceBot...")
+        self.application.run_polling()
 
-# Створення екземпляру бота
-bot = VoiceBot()
-
-# Ініціалізація Application та створення глобального event loop
-import asyncio
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-loop.run_until_complete(bot.application.initialize())
-
-@app.route('/')
-def home():
-    return "🤖 VoiceBot працює! Надішліть голосове повідомлення в Telegram."
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    """Обробка webhook від Telegram"""
-    try:
-        # Отримання даних від Telegram
-        update = Update.de_json(request.get_json(), bot.application.bot)
-        
-        # Використовуємо глобальний event loop
-        loop.run_until_complete(bot.application.process_update(update))
-        
-        return 'OK'
-    except Exception as e:
-        logger.error(f"Помилка обробки webhook: {e}")
-        return 'Error', 500
-
-if __name__ == '__main__':
-    # Запуск Flask додатку
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False) 
+if __name__ == "__main__":
+    bot = VoiceBot()
+    bot.run() 
